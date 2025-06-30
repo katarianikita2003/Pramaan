@@ -6,6 +6,9 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { generateProof, generateKeys, verifyProof } from './zokratesUtils.js';
+import saasRoutes from './routes/saasRoutes.js';
+import dashboardRoutes from './routes/dashboardRoutes.js';
+import User from './models/User.js';
 
 // Configure environment variables
 dotenv.config();
@@ -13,32 +16,35 @@ dotenv.config();
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
+app.use(saasRoutes);
+app.use(dashboardRoutes);
 
 // **📌 Connect to MongoDB**
-mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log("✅ Connected to MongoDB"))
     .catch(err => console.error("❌ MongoDB Connection Error:", err));
-
+    
 if (process.env.NODE_ENV !== "production") {
     console.log("🔗 Connecting to MongoDB at:", process.env.MONGO_URI);
 }
 
 // **📌 User Schema & Model**
-const UserSchema = new mongoose.Schema({
-    name: { type: String, required: true },
-    age: { type: Number, required: true },
-    email: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
-    did: { type: String, unique: true },
-    latestProof: { type: Object },
-    latestVerificationKey: { type: String },
-    proofHistory: [{
-        date: { type: Date, default: Date.now },
-        status: { type: String, enum: ["Success", "Failure"] }
-    }]
-});
+// const UserSchema = new mongoose.Schema({
+//     name: { type: String, required: true },
+//     age: { type: Number, required: true },
+//     email: { type: String, required: true, unique: true },
+//     password: { type: String, required: true },
+//     did: { type: String, unique: true },
+//     latestProof: { type: Object },
+//     latestVerificationKey: { type: String },
+//     proofHistory: [{
+//         date: { type: Date, default: Date.now },
+//         status: { type: String, enum: ["Success", "Failure"] }
+//     }]
+// });
 
-const User = mongoose.model("User", UserSchema);
+// const User = mongoose.model("User", UserSchema);
+
 
 // **📌 Route: Signup (User Registration)**
 app.post("/api/signup", async (req, res) => {
