@@ -1,0 +1,27 @@
+{
+  "inputs": [
+    {
+      "name": "hashed_biometric_1",
+      "public": false,
+      "type": "field"
+    },
+    {
+      "name": "hashed_biometric_2",
+      "public": false,
+      "type": "field"
+    },
+    {
+      "name": "stored_did_1",
+      "public": true,
+      "type": "field"
+    },
+    {
+      "name": "stored_did_2",
+      "public": true,
+      "type": "field"
+    }
+  ],
+  "output": {
+    "type": "bool"
+  }
+}

@@ -1,0 +1,12 @@
+// Pramaan: Biometric-based ZKP Authentication
+
+def main(private field hashed_biometric_1, private field hashed_biometric_2,
+         field stored_did_1, field stored_did_2) -> bool {
+    
+    // Step 1: Compare precomputed hash with stored DID
+    assert(hashed_biometric_1 == stored_did_1);
+    assert(hashed_biometric_2 == stored_did_2);
+    
+    // If both parts match, authentication is successful
+    return true;
+}
