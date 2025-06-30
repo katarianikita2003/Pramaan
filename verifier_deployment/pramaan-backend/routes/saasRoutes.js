@@ -169,6 +169,8 @@ router.post('/api/v1/verify',
             const { proof, userId } = req.body;
             const organization = req.organization;
 
+            console.log('🔍 Verify request:', { userId, hasProof: !!proof });
+
             const user = await User.findById(userId);
             if (!user) {
                 return res.status(404).json({ error: 'User not found' });
@@ -186,8 +188,14 @@ router.post('/api/v1/verify',
                 });
             }
 
+            console.log('🔍 User found, checking proof...');
+            console.log('Latest proof exists:', !!user.latestProof);
+            console.log('Verification key exists:', !!user.latestVerificationKey);
+
             // Verify proof
             const isValid = await verifyProof(proof, user.latestVerificationKey);
+
+            console.log('🔍 Verification result:', isValid);
 
             // Log verification
             user.proofHistory.push({

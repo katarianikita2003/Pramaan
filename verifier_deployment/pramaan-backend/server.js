@@ -6,20 +6,25 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { generateProof, generateKeys, verifyProof } from './zokratesUtils.js';
+import User from './models/User.js';
 import saasRoutes from './routes/saasRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
-import User from './models/User.js';
+import billingRoutes from './routes/billingRoutes.js';
 
 // Configure environment variables
 dotenv.config();
 
 const app = express();
-app.use(cors());
-app.use(bodyParser.json());
-app.use(saasRoutes);
-app.use(dashboardRoutes);
 
-// **📌 Connect to MongoDB**
+// CORS must come first
+app.use(cors());
+
+// IMPORTANT: Set up body parsing BEFORE routes
+// Regular JSON body parser for most routes
+app.use(express.json());
+app.use(bodyParser.json());
+
+// Connect to MongoDB
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log("✅ Connected to MongoDB"))
     .catch(err => console.error("❌ MongoDB Connection Error:", err));
@@ -28,25 +33,15 @@ if (process.env.NODE_ENV !== "production") {
     console.log("🔗 Connecting to MongoDB at:", process.env.MONGO_URI);
 }
 
-// **📌 User Schema & Model**
-// const UserSchema = new mongoose.Schema({
-//     name: { type: String, required: true },
-//     age: { type: Number, required: true },
-//     email: { type: String, required: true, unique: true },
-//     password: { type: String, required: true },
-//     did: { type: String, unique: true },
-//     latestProof: { type: Object },
-//     latestVerificationKey: { type: String },
-//     proofHistory: [{
-//         date: { type: Date, default: Date.now },
-//         status: { type: String, enum: ["Success", "Failure"] }
-//     }]
-// });
+// API Routes - these need body parser
+app.use(saasRoutes);
+app.use(dashboardRoutes);
 
-// const User = mongoose.model("User", UserSchema);
+// Billing routes - special handling for Stripe webhook
+app.use(billingRoutes);
 
-
-// **📌 Route: Signup (User Registration)**
+// Original API Routes
+// Route: Signup (User Registration)
 app.post("/api/signup", async (req, res) => {
     try {
         const { name, age, email, password, confirmPassword } = req.body;
@@ -91,7 +86,7 @@ app.post("/api/signup", async (req, res) => {
     }
 });
 
-// **📌 Route: Login**
+// Route: Login
 app.post("/api/login", async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -130,7 +125,7 @@ app.post("/api/login", async (req, res) => {
     }
 });
 
-// **📌 Route: Register (Employee/Biometric ID)**
+// Route: Register (Employee/Biometric ID)
 app.post("/api/register", async (req, res) => {
     try {
         const { email } = req.body;
@@ -155,7 +150,7 @@ app.post("/api/register", async (req, res) => {
     }
 });
 
-// **📌 Route: Authenticate User & Generate Proof**
+// Route: Authenticate User & Generate Proof
 app.post("/api/authenticate", async (req, res) => {
     try {
         const { email } = req.body;
@@ -184,7 +179,7 @@ app.post("/api/authenticate", async (req, res) => {
     }
 });
 
-// **📌 Route: Verify Proof**
+// Route: Verify Proof
 app.post("/api/verify", async (req, res) => {
     try {
         const { proof, email } = req.body;
@@ -220,7 +215,7 @@ app.post("/api/verify", async (req, res) => {
     }
 });
 
-// **📌 Route: Fetch Proof History (User Specific)**
+// Route: Fetch Proof History (User Specific)
 app.get("/api/proof-history/:email", async (req, res) => {
     try {
         const { email } = req.params;
@@ -235,11 +230,11 @@ app.get("/api/proof-history/:email", async (req, res) => {
     }
 });
 
-// **📌 Default Route**
+// Default Route
 app.get("/", (req, res) => {
     res.send("✅ Pramaan Backend is Running with MongoDB!");
 });
 
-// **Start Server**
+// Start Server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
