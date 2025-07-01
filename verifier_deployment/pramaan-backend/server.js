@@ -5,7 +5,7 @@ import bodyParser from 'body-parser';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { generateProof, generateKeys, verifyProof } from './zokratesUtils.js';
+import { generateProof, generateKeys, verifyProof, getZoKratesStatus } from './zokratesUtils.js';
 import User from './models/User.js';
 import saasRoutes from './routes/saasRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
@@ -150,10 +150,12 @@ app.post("/api/register", async (req, res) => {
     }
 });
 
-// Route: Authenticate User & Generate Proof
+// **📌 Route: Authenticate User & Generate Proof**
 app.post("/api/authenticate", async (req, res) => {
     try {
         const { email } = req.body;
+        
+        console.log('🔐 Authentication request for:', email);
         
         if (!email) {
             return res.status(400).json({ error: "Email is required" });
@@ -162,58 +164,240 @@ app.post("/api/authenticate", async (req, res) => {
         const user = await User.findOne({ email });
 
         if (!user) {
+            console.log('❌ User not found:', email);
             return res.status(404).json({ error: "User not found" });
         }
 
-        const { provingKey, verificationKey } = generateKeys();
-        const proof = generateProof(user.email, provingKey);
+        console.log('✅ User found:', user.email);
+        console.log('🔐 Generating ZK proof...');
 
-        user.latestProof = proof;
-        user.latestVerificationKey = verificationKey;
-        await user.save();
+        try {
+            // Check ZoKrates status
+            const zkStatus = getZoKratesStatus();
+            console.log('ZoKrates status:', zkStatus);
 
-        res.json({ proof, provingKey });
+            const { provingKey, verificationKey } = await generateKeys();
+            console.log('✅ Keys generated');
+            
+            // Use user's email and DID for proof generation
+            const proof = await generateProof(user.email, provingKey, user.did);
+            console.log('✅ Proof generated');
+
+            // Store the proof and keys for verification
+            user.latestProof = proof;
+            user.latestVerificationKey = verificationKey;
+            await user.save();
+            console.log('✅ Proof saved to user');
+
+            res.json({ 
+                proof, 
+                provingKey,
+                zkStatus: zkStatus.message,
+                isRealProof: zkStatus.ready
+            });
+        } catch (zkError) {
+            console.error('❌ ZK Proof generation error:', zkError);
+            throw zkError;
+        }
     } catch (error) {
         console.error("❌ Authentication Error:", error);
-        res.status(500).json({ error: "Internal Server Error" });
+        console.error("Stack trace:", error.stack);
+        res.status(500).json({ 
+            error: "Internal Server Error",
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
 
-// Route: Verify Proof
+// **📌 Route: Verify Proof**
 app.post("/api/verify", async (req, res) => {
     try {
         const { proof, email } = req.body;
 
-        if (!email) return res.status(400).json({ error: "Email is required!" });
+        if (!email) {
+            return res.status(400).json({ error: "Email is required!" });
+        }
+
+        if (!proof) {
+            return res.status(400).json({ error: "Proof is required!" });
+        }
+
+        console.log('🔍 Verification request from:', email);
 
         const user = await User.findOne({ email });
         if (!user) {
+            console.log('❌ User not found:', email);
             return res.status(404).json({ error: "User not found" });
         }
 
         if (!user.latestProof) {
+            console.log('❌ No proof stored for user:', email);
             return res.status(400).json({ error: "No proof available for verification!" });
         }
 
-        // Ensure proof matches the latest generated proof
-        if (JSON.stringify(proof) !== JSON.stringify(user.latestProof)) {
-            return res.status(400).json({ error: "Proof does not match latest generated proof!" });
+        console.log('🔍 Verifying ZK proof...');
+
+        // Check ZoKrates status
+        const zkStatus = getZoKratesStatus();
+        console.log('ZoKrates status:', zkStatus);
+
+        // Deep comparison of proof structure
+        const isProofStructureValid = (
+            proof.proof &&
+            proof.proof.a && Array.isArray(proof.proof.a) && proof.proof.a.length === 2 &&
+            proof.proof.b && Array.isArray(proof.proof.b) && proof.proof.b.length === 2 &&
+            proof.proof.c && Array.isArray(proof.proof.c) && proof.proof.c.length === 2 &&
+            proof.inputs && Array.isArray(proof.inputs)
+        );
+
+        if (!isProofStructureValid) {
+            console.log('❌ Invalid proof structure');
+            return res.status(400).json({ 
+                error: "Invalid proof format",
+                success: false 
+            });
         }
 
-        const verificationKey = user.latestVerificationKey;
-        const isVerified = await verifyProof(proof, verificationKey);
+        // Compare proof with stored proof
+        const storedProofString = JSON.stringify(user.latestProof);
+        const providedProofString = JSON.stringify(proof);
+        
+        // For development: log proof comparison
+        console.log('Stored proof hash:', crypto.createHash('sha256').update(storedProofString).digest('hex').substring(0, 16));
+        console.log('Provided proof hash:', crypto.createHash('sha256').update(providedProofString).digest('hex').substring(0, 16));
+
+        // Verify using ZoKrates if available
+        let isVerified = false;
+        
+        if (zkStatus.ready) {
+            try {
+                // Use actual ZoKrates verification
+                isVerified = await verifyProof(proof, user.latestVerificationKey);
+                console.log('✅ ZoKrates verification result:', isVerified);
+            } catch (error) {
+                console.error('❌ ZoKrates verification error:', error);
+                // Fall back to proof comparison
+                isVerified = storedProofString === providedProofString;
+            }
+        } else {
+            // When ZoKrates is not ready, do strict proof comparison
+            isVerified = storedProofString === providedProofString;
+            console.log('⚠️ Using proof comparison (ZoKrates not ready)');
+        }
+
+        // Additional validation: Check if proof was generated recently (within 5 minutes)
+        const proofAge = user.proofHistory.length > 0 ? 
+            Date.now() - new Date(user.proofHistory[user.proofHistory.length - 1].date).getTime() : 
+            Infinity;
+        
+        const isProofFresh = proofAge < 5 * 60 * 1000; // 5 minutes
+        
+        if (!isProofFresh && isVerified) {
+            console.log('⚠️ Proof is valid but expired (older than 5 minutes)');
+        }
 
         const verificationStatus = isVerified ? "Success" : "Failure";
 
-        user.proofHistory.push({ status: verificationStatus });
+        // Log verification attempt
+        user.proofHistory.push({ 
+            status: verificationStatus,
+            isRealProof: zkStatus.ready,
+            date: new Date()
+        });
+        
+        // Limit proof history to last 50 entries
+        if (user.proofHistory.length > 50) {
+            user.proofHistory = user.proofHistory.slice(-50);
+        }
+        
         await user.save();
 
-        res.json({ success: isVerified });
+        console.log(`✅ Verification complete: ${verificationStatus}`);
+
+        res.json({ 
+            success: isVerified,
+            zkStatus: zkStatus.message,
+            isRealProof: zkStatus.ready,
+            message: isVerified ? 
+                "✅ Authentication successful! Proof is valid." : 
+                "❌ Authentication failed! Invalid proof.",
+            proofAge: isProofFresh ? "fresh" : "expired"
+        });
+        
     } catch (error) {
         console.error("❌ Verification Error:", error);
-        res.status(500).json({ error: "Internal Server Error" });
+        console.error("Stack trace:", error.stack);
+        res.status(500).json({ 
+            error: "Internal Server Error",
+            success: false
+        });
     }
 });
+
+// Route: Authenticate User & Generate Proof
+// app.post("/api/authenticate", async (req, res) => {
+//     try {
+//         const { email } = req.body;
+        
+//         if (!email) {
+//             return res.status(400).json({ error: "Email is required" });
+//         }
+
+//         const user = await User.findOne({ email });
+
+//         if (!user) {
+//             return res.status(404).json({ error: "User not found" });
+//         }
+
+//         const { provingKey, verificationKey } = generateKeys();
+//         const proof = generateProof(user.email, provingKey);
+
+//         user.latestProof = proof;
+//         user.latestVerificationKey = verificationKey;
+//         await user.save();
+
+//         res.json({ proof, provingKey });
+//     } catch (error) {
+//         console.error("❌ Authentication Error:", error);
+//         res.status(500).json({ error: "Internal Server Error" });
+//     }
+// });
+
+// Route: Verify Proof
+// app.post("/api/verify", async (req, res) => {
+//     try {
+//         const { proof, email } = req.body;
+
+//         if (!email) return res.status(400).json({ error: "Email is required!" });
+
+//         const user = await User.findOne({ email });
+//         if (!user) {
+//             return res.status(404).json({ error: "User not found" });
+//         }
+
+//         if (!user.latestProof) {
+//             return res.status(400).json({ error: "No proof available for verification!" });
+//         }
+
+//         // Ensure proof matches the latest generated proof
+//         if (JSON.stringify(proof) !== JSON.stringify(user.latestProof)) {
+//             return res.status(400).json({ error: "Proof does not match latest generated proof!" });
+//         }
+
+//         const verificationKey = user.latestVerificationKey;
+//         const isVerified = await verifyProof(proof, verificationKey);
+
+//         const verificationStatus = isVerified ? "Success" : "Failure";
+
+//         user.proofHistory.push({ status: verificationStatus });
+//         await user.save();
+
+//         res.json({ success: isVerified });
+//     } catch (error) {
+//         console.error("❌ Verification Error:", error);
+//         res.status(500).json({ error: "Internal Server Error" });
+//     }
+// });
 
 // Route: Fetch Proof History (User Specific)
 app.get("/api/proof-history/:email", async (req, res) => {

@@ -1,0 +1,18 @@
+// Example: How to use ZoKrates with Pramaan
+
+// For Windows users with paths containing spaces:
+// 1. Use the zokrates.bat file in the workspace directory
+// 2. Or use the Node.js integration which handles paths automatically
+
+// Example commands (run from workspace directory):
+
+// 1. Generate witness (example input)
+// Biometric hash parts: 123456789, 987654321
+// DID hash parts: 123456789, 987654321
+zokrates.bat compute-witness -i /home/zokrates/workspace/out -a 123456789 987654321 123456789 987654321 -o /home/zokrates/workspace/witness
+
+// 2. Generate proof
+zokrates.bat generate-proof -i /home/zokrates/workspace/out -j /home/zokrates/workspace/proof.json -p /home/zokrates/workspace/proving.key -w /home/zokrates/workspace/witness
+
+// 3. Verify proof
+zokrates.bat verify -v /home/zokrates/workspace/verification.key -j /home/zokrates/workspace/proof.json
